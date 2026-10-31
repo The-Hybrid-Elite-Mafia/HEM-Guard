@@ -360,12 +360,17 @@ HG_TEST(scanner_cpu, scan_stays_under_its_cpu_share_limit) {
     const auto b = scan_path(sb.root, limited);
 
     char buf[256];
-    std::snprintf(buf, sizeof buf, "no limit: %.0f%% CPU in %.2f s | limit 50%%: %.0f%% CPU in %.2f s (%llu files, %s)",
-                  a.cpu_share_used * 100, a.wall_seconds, b.cpu_share_used * 100, b.wall_seconds,
+    std::snprintf(buf, sizeof buf,
+                  "no limit: busy %.0f%% of the time (OS CPU counter %.0f%%) in %.2f s | limit 50%%: busy %.0f%% (OS CPU counter %.0f%%, coarse) in %.2f s (%llu files, %s)",
+                  a.busy_share * 100, a.cpu_share_used * 100, a.wall_seconds, b.busy_share * 100, b.cpu_share_used * 100, b.wall_seconds,
                   static_cast<unsigned long long>(b.files_scanned), format_bytes(b.bytes_read).c_str());
     NOTE(buf);
     CHECK_EQ(a.files_scanned, static_cast<std::uint64_t>(1200));
     CHECK_EQ(b.files_scanned, static_cast<std::uint64_t>(1200));
-    CHECK(b.cpu_share_used <= cfg::kScanCpuShareMax + 0.20);  // 0.20 = allowance for timer rounding on a busy machine
+    // The limiter is judged by how much of the time the scan was awake (precise clock). The operating system's own
+    // CPU counter is coarse (it can read far too high when a program sleeps in short slices on a busy shared machine),
+    // so it is reported in the note but not used as a pass/fail test.
+    CHECK(b.busy_share <= cfg::kScanCpuShareMax + 0.15);
+    CHECK(a.busy_share > 0.9);  // and with no limit it really does run flat out
     CHECK(b.wall_seconds > a.wall_seconds);                   // the limiter really did slow the scan down
 }

@@ -55,6 +55,7 @@ struct ScanReport {
     std::uint64_t bytes_read = 0;
     double wall_seconds = 0;
     double cpu_seconds = 0;
+    double busy_share = 0;                // share of the wall time spent working (not paused by the limiter); measured with a precise clock
     double cpu_share_used = 0;            // cpu_seconds / wall_seconds (this whole process)
     std::vector<Finding> findings;
 };

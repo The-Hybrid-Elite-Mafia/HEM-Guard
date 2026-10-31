@@ -252,6 +252,7 @@ ScanReport scan_path(const fs::path& root, const ScanOptions& opt_in) {
     rep.wall_seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - wall0).count();
     rep.cpu_seconds = process_cpu_seconds() - cpu0;
     rep.cpu_share_used = rep.wall_seconds > 0 ? rep.cpu_seconds / rep.wall_seconds : 0.0;
+    rep.busy_share = rep.wall_seconds > 0 ? std::max(0.0, 1.0 - throttle.total_slept_seconds() / rep.wall_seconds) : 0.0;
     return rep;
 }
 
