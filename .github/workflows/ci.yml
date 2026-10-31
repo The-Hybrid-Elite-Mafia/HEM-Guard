@@ -67,7 +67,14 @@ jobs:
           New-Item -ItemType Directory -Force $sb | Out-Null
           $p = Start-Process -FilePath "dist\HEM-Guard\HEM-Guard.exe" -ArgumentList @("--selftest", $sb) -PassThru
           if (-not $p.WaitForExit(240000)) { $p.Kill(); Write-Host "TIMED OUT"; $code = 99 } else { $code = $p.ExitCode }
-          if (Test-Path "$sb\selftest-result.txt") { Get-Content "$sb\selftest-result.txt" | Tee-Object -Variable res | Write-Host; ("### Window self-test`n```" + "`n" + ($res -join "`n") + "`n```") | Add-Content $env:GITHUB_STEP_SUMMARY } else { Write-Host "no result file was written" }
+          if (Test-Path "$sb\selftest-result.txt") {
+            $res = Get-Content "$sb\selftest-result.txt"
+            $res | Write-Host
+            Add-Content $env:GITHUB_STEP_SUMMARY "### Window self-test"
+            Add-Content $env:GITHUB_STEP_SUMMARY '```'
+            $res | Add-Content $env:GITHUB_STEP_SUMMARY
+            Add-Content $env:GITHUB_STEP_SUMMARY '```'
+          } else { Write-Host "no result file was written" }
           Add-Type -AssemblyName System.Drawing
           New-Item -ItemType Directory -Force screenshots | Out-Null
           Get-ChildItem "$sb\shots\*.bmp" -ErrorAction SilentlyContinue | ForEach-Object {
