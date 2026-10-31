@@ -5,6 +5,9 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   windows:
     name: Windows (the real test)
@@ -47,14 +50,56 @@ jobs:
           .\build\Release\hem_guard_cli.exe startup list
           .\build\Release\hem_guard_cli.exe version
 
-      - name: Package the Windows zip
+      - name: Stage the program folder
         if: always()
         shell: pwsh
         run: |
           $d = "dist\HEM-Guard"
           New-Item -ItemType Directory -Force "$d\rules" | Out-Null
           Copy-Item build\Release\hem_guard_cli.exe $d
+          Copy-Item build\Release\hem_guard_gui.exe "$d\HEM-Guard.exe"
           Copy-Item rules\*.txt "$d\rules"
+
+      - name: Window self-test (opens the real window, drives every tab on made-up files, takes screenshots)
+        shell: pwsh
+        run: |
+          $sb = Join-Path $env:RUNNER_TEMP "hg-gui-selftest"
+          New-Item -ItemType Directory -Force $sb | Out-Null
+          $p = Start-Process -FilePath "dist\HEM-Guard\HEM-Guard.exe" -ArgumentList @("--selftest", $sb) -PassThru
+          if (-not $p.WaitForExit(240000)) { $p.Kill(); Write-Host "TIMED OUT"; $code = 99 } else { $code = $p.ExitCode }
+          if (Test-Path "$sb\selftest-result.txt") { Get-Content "$sb\selftest-result.txt" | Tee-Object -Variable res | Write-Host; ("### Window self-test`n```" + "`n" + ($res -join "`n") + "`n```") | Add-Content $env:GITHUB_STEP_SUMMARY } else { Write-Host "no result file was written" }
+          Add-Type -AssemblyName System.Drawing
+          New-Item -ItemType Directory -Force screenshots | Out-Null
+          Get-ChildItem "$sb\shots\*.bmp" -ErrorAction SilentlyContinue | ForEach-Object {
+            $img = [System.Drawing.Image]::FromFile($_.FullName)
+            $img.Save((Join-Path "screenshots" ($_.BaseName + ".png")), [System.Drawing.Imaging.ImageFormat]::Png)
+            $img.Dispose()
+          }
+          if ($code -ne 0) { throw "window self-test failed with exit code $code" }
+
+      - name: Publish screenshots (so they can be looked at)
+        if: always() && github.ref == 'refs/heads/main'
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          if (-not (Test-Path screenshots)) { exit 0 }
+          $t = Join-Path $env:RUNNER_TEMP "shots-repo"
+          New-Item -ItemType Directory -Force $t | Out-Null
+          Copy-Item screenshots\*.png $t
+          Push-Location $t
+          git init -q -b ci-screenshots
+          git config user.name "HEM Guard CI"
+          git config user.email "ci@hem.invalid"
+          git add .
+          git commit -q -m "window screenshots from run ${{ github.run_id }}"
+          git push -q --force "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" ci-screenshots
+          Pop-Location
+
+      - name: Package the Windows zip
+        if: always()
+        shell: pwsh
+        run: |
+          $d = "dist\HEM-Guard"
           Copy-Item packaging\* $d
           Copy-Item docs\GUIDE.txt $d
           if (Test-Path test-report.md) { Copy-Item test-report.md "$d\TEST-REPORT.md" }

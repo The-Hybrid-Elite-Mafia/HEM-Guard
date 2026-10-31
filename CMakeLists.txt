@@ -42,6 +42,13 @@ endif()
 add_executable(hem_guard_cli cli/main.cpp)
 target_link_libraries(hem_guard_cli PRIVATE hem_guard_core)
 
+# ---- hem_guard_gui : the window (Windows only) ----
+if(WIN32)
+  add_executable(hem_guard_gui WIN32 gui/main_win.cpp)
+  target_compile_definitions(hem_guard_gui PRIVATE UNICODE _UNICODE)
+  target_link_libraries(hem_guard_gui PRIVATE hem_guard_core comctl32 shell32 ole32 user32 gdi32)
+endif()
+
 # ---- tests ----
 if(HEM_GUARD_BUILD_TESTS)
   add_executable(hem_guard_tests
