@@ -19,7 +19,22 @@ WHAT IT IS NOT (please read)
    source you trust (see "Adding real rules" below).
  - "Nothing found" does not prove a file is safe.
 
-HOW TO USE IT - just double-click the numbered files:
+THE EASY WAY - the window
+ Double-click "0 - Open HEM Guard (the window).bat" (or HEM-Guard.exe).
+ Four tabs:
+   Scan     Pick a folder, press Scan. Results are coloured by how worrying
+            they are. "Quarantine selected" moves a file away (you can bring
+            it back from the Quarantine view). Scanning only reads.
+   Clean    "Preview" shows what could be cleaned and changes nothing.
+            "Clean now" asks you to confirm, then MOVES files to the Undo
+            folder. "Undo last clean" puts them back. The CAREFUL box adds
+            your Recycle Bin and the Windows Update cache (off by default).
+   Startup  Lists what starts with Windows, signed or not. "Turn OFF
+            selected" flips Windows' own on/off switch. Nothing is deleted.
+   Storage  Biggest folders, file types, biggest files, and identical files.
+            Reports only.
+
+THE OLD WAY - the numbered files (same engine, plain text)
  1  Scan my Downloads folder        Only reads. Never deletes.
  2  Scan any folder                 You type the folder.
  3  Preview clean                   Shows what COULD be cleaned. Changes nothing.
@@ -62,6 +77,12 @@ ADDING REAL RULES
  - rules\hem_known_bad_hashes.txt : one SHA-256 per line, then a name.
  - rules\hem_rules.txt            : one pattern rule per line (examples inside).
  Only add data from a source you trust. A wrong entry can flag a good file.
+
+A FEW LIMITS OF THE WINDOW (v0.1)
+ - The Storage tab's two jobs cannot be cancelled once started. Pick a
+   small folder first (not a whole drive) if you are unsure.
+ - It was checked on a Windows test machine at one screen size. Please tell
+   me if something looks cut off or odd on yours.
 
 FILES THIS TOOL CREATES (all in %LOCALAPPDATA%\HEM Guard)
    Quarantine\   Undo\   startup-journal.tsv

@@ -1069,8 +1069,8 @@ LRESULT CALLBACK MainProc(HWND h, UINT m, WPARAM w, LPARAM l) {
             return 0;
         case WM_GETMINMAXINFO: {
             auto* mm = reinterpret_cast<MINMAXINFO*>(l);
-            mm->ptMinTrackSize.x = S(900);
-            mm->ptMinTrackSize.y = S(620);
+            mm->ptMinTrackSize.x = S(820);
+            mm->ptMinTrackSize.y = S(560);
             return 0;
         }
         case WM_DPICHANGED: {
@@ -1392,15 +1392,23 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
     wc.lpszClassName = L"HemGuardMain";
     RegisterClassExW(&wc);
 
-    const int dpi0 = 96;
-    HWND h = CreateWindowExW(0, L"HemGuardMain", L"HEM Guard", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, CW_USEDEFAULT, CW_USEDEFAULT,
-                             MulDiv(1060, dpi0, 96), MulDiv(740, dpi0, 96), nullptr, nullptr, inst, nullptr);
+    // Start at a comfortable size, but never bigger than the screen's usable area.
+    const int dpi0 = static_cast<int>(GetDpiForSystem());
+    RECT wa{};
+    SystemParametersInfoW(SPI_GETWORKAREA, 0, &wa, 0);
+    const int want_w = MulDiv(1060, dpi0, 96), want_h = MulDiv(740, dpi0, 96);
+    const int ww = std::min<int>(want_w, (wa.right - wa.left) * 95 / 100), wh = std::min<int>(want_h, (wa.bottom - wa.top) * 95 / 100);
+    HWND h = CreateWindowExW(0, L"HemGuardMain", L"HEM Guard", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, wa.left + ((wa.right - wa.left) - ww) / 2,
+                             wa.top + ((wa.bottom - wa.top) - wh) / 2, ww, wh, nullptr, nullptr, inst, nullptr);
     if (!h) return 2;
     if (!selftest.empty()) return run_selftest(selftest);
     ShowWindow(h, show);
     UpdateWindow(h);
     MSG msg;
     while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
+        // Let the Tab key and arrow keys move between the buttons of the page that is showing.
+        const int cur = g.tab ? TabCtrl_GetCurSel(g.tab) : -1;
+        if (cur >= 0 && cur < 4 && g.page[cur] && IsDialogMessageW(g.page[cur], &msg)) continue;
         TranslateMessage(&msg);
         DispatchMessageW(&msg);
     }
