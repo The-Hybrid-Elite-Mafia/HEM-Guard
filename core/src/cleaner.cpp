@@ -97,6 +97,7 @@ Environment Environment::detect() {
     env.local_appdata = norm_or_empty(env.local_appdata);
     env.windir = norm_or_empty(env.windir);
     env.system_drive_root = norm_or_empty(env.system_drive_root);
+    env.user_sid = current_user_sid();
     if (!env.local_appdata.empty()) env.undo_root = env.local_appdata / "HEM Guard" / "Undo";
     return env;
 }
@@ -183,12 +184,28 @@ std::vector<CleanTarget> default_targets(const Environment& env, std::vector<std
             "thumbcache_*.db", false, cfg::kCacheMinAgeHours);
     }
     if (!env.system_drive_root.empty()) {
-        add("recycle-bin", "Recycle Bin", env.system_drive_root / "$Recycle.Bin", Risk::Careful, "", true, cfg::kCacheMinAgeHours);
+        // Only YOUR Recycle Bin folder (named after your account id), never other people's.
+        const std::string sid = env.user_sid;
+        if (!sid.empty()) {
+            add("recycle-bin", "Recycle Bin (your own)", env.system_drive_root / "$Recycle.Bin" / from_u8(sid), Risk::Careful, "", true,
+                cfg::kCacheMinAgeHours);
+        } else if (notes) {
+            notes->push_back("left out \"Recycle Bin\": could not tell which one is yours");
+        }
     }
 
     std::vector<CleanTarget> ok;
     for (auto& t : all) {
         std::string why;
+        // A temp folder must really be called Temp or Tmp. (A TEMP setting that points at a Dropbox or work
+        // folder is left alone.)
+        if ((t.id == "user-temp" || t.id == "windows-temp") && !t.root.empty()) {
+            const std::string leaf = to_lower_ascii(to_u8(t.root.filename()));
+            if (leaf != "temp" && leaf != "tmp") {
+                if (notes) notes->push_back("left out \"" + t.label + "\": its folder is not called Temp");
+                continue;
+            }
+        }
         if (target_is_sane(t, env, &why)) ok.push_back(std::move(t));
         else if (notes) notes->push_back("left out \"" + t.label + "\": it " + why);
     }
@@ -347,6 +364,11 @@ ApplyResult apply_plan(const CleanPlan& plan, const Environment& env, const std:
     const std::int64_t now = now_in ? now_in : unix_now();
 
     JudgeCache cache;
+    // Re-check that every target is still sane, right now. Anything that is not is dropped.
+    std::vector<CleanTarget> checked_targets;
+    for (const auto& t : targets) {
+        if (target_is_sane(t, env, nullptr)) checked_targets.push_back(t);
+    }
     std::string err;
     if (!undo.begin_batch(res.batch_id, err)) {
         res.dry_run = true;  // could not even open an undo batch, so nothing was touched
@@ -355,8 +377,9 @@ ApplyResult apply_plan(const CleanPlan& plan, const Environment& env, const std:
     }
 
     for (const auto& item : plan.items) {
-        // Re-check everything, right now, with fresh eyes.
-        const Verdict v = judge_impl(item.path, env, targets, cache);
+        // Re-check everything, right now, with fresh eyes. One cleaned-up path is used for judging AND moving.
+        const fs::path np = normalize_path(item.path);
+        const Verdict v = judge_impl(np, env, checked_targets, cache);
         if (v.risk == Risk::DoNotTouch || !v.target) {
             ++res.refused;
             res.messages.push_back("refused " + to_u8(item.path) + ": " + v.reason);
@@ -373,21 +396,21 @@ ApplyResult apply_plan(const CleanPlan& plan, const Environment& env, const std:
             continue;
         }
         std::error_code ec;
-        const auto st = fs::symlink_status(item.path, ec);
+        const auto st = fs::symlink_status(np, ec);
         if (ec || !fs::is_regular_file(st)) {
             ++res.refused;
             res.messages.push_back("refused " + to_u8(item.path) + ": not a plain file any more");
             continue;
         }
         if (v.target->min_age_hours > 0 &&
-            now - file_mtime_unix(item.path) < static_cast<std::int64_t>(v.target->min_age_hours) * 3600) {
+            now - file_mtime_unix(np) < static_cast<std::int64_t>(v.target->min_age_hours) * 3600) {
             ++res.refused;
             res.messages.push_back("refused " + to_u8(item.path) + ": changed recently");
             continue;
         }
-        const std::uint64_t size = fs::file_size(item.path, ec);
+        const std::uint64_t size = fs::file_size(np, ec);
         std::string serr;
-        if (undo.store(res.batch_id, normalize_path(item.path), ec ? item.size : size, serr)) {
+        if (undo.store(res.batch_id, np, ec ? item.size : size, serr)) {
             ++res.moved;
             res.moved_bytes += ec ? item.size : size;
         } else {
@@ -399,8 +422,11 @@ ApplyResult apply_plan(const CleanPlan& plan, const Environment& env, const std:
         // Empty batch: tidy it away so it does not clutter the undo list.
         std::error_code ec;
         const fs::path dir = undo.root() / res.batch_id;
-        if (UndoStore::is_batch_id(res.batch_id) && path_is_within(normalize_path(dir), normalize_path(undo.root())))
-            fs::remove_all(dir, ec);
+        if (UndoStore::is_batch_id(res.batch_id) && path_is_within(normalize_path(dir), normalize_path(undo.root()))) {
+            fs::remove(dir / "items.tsv", ec);
+            fs::remove(dir / "batch.meta", ec);
+            fs::remove(dir, ec);  // not recursive: leaves the folder alone if anything else is inside
+        }
         res.batch_id.clear();
     }
     return res;

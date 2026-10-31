@@ -32,6 +32,7 @@ struct Environment {
     fs::path system_drive_root;
     std::vector<std::pair<std::string, fs::path>> protected_folders;  // label, path
     fs::path undo_root;  // where the undo folder lives
+    std::string user_sid;  // your own account id; only YOUR Recycle Bin folder is ever a target
 
     // Reads the real Windows folders. On non-Windows it returns an EMPTY environment (nothing can be cleaned).
     static Environment detect();

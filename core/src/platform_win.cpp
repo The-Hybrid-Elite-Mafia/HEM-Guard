@@ -8,6 +8,7 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#include <sddl.h>
 // order matters
 #include <shlobj.h>
 #include <softpub.h>
@@ -256,6 +257,26 @@ int run_process(const std::vector<std::string>& args, std::string& output) {
     CloseHandle(pi.hProcess);
     CloseHandle(pi.hThread);
     return static_cast<int>(code);
+}
+
+std::string current_user_sid() {
+    HANDLE tok = nullptr;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &tok)) return {};
+    DWORD need = 0;
+    GetTokenInformation(tok, TokenUser, nullptr, 0, &need);
+    std::string out;
+    if (need > 0) {
+        std::vector<unsigned char> buf(need);
+        if (GetTokenInformation(tok, TokenUser, buf.data(), need, &need)) {
+            LPWSTR w = nullptr;
+            if (ConvertSidToStringSidW(reinterpret_cast<TOKEN_USER*>(buf.data())->User.Sid, &w) && w) {
+                out = to_u8(fs::path(std::wstring(w)));
+                LocalFree(w);
+            }
+        }
+    }
+    CloseHandle(tok);
+    return out;
 }
 
 bool is_windows() { return true; }

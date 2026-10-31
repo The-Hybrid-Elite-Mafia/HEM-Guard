@@ -57,6 +57,8 @@ int run_process(const std::vector<std::string>&, std::string& output) {
     return -1;
 }
 
+std::string current_user_sid() { return {}; }
+
 bool is_windows() { return false; }
 
 }  // namespace hem::guard

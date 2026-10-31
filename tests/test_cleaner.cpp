@@ -78,6 +78,7 @@ struct World {
         mk("Windows/SoftwareDistribution/Download/update1.cab", std::string(4000, 'U'));
         mk("Drive/$Recycle.Bin/S-1-5-21-1/$R123.txt", "deleted file body");
         mk("Drive/$Recycle.Bin/S-1-5-21-1/$I123.txt", "deleted file info");
+        mk("Drive/$Recycle.Bin/S-1-5-21-2/$R999.txt", "ANOTHER USER deleted this");
         // Something totally outside every cleanup place.
         mk("Other/random.dat", "not on any list");
 
@@ -87,6 +88,7 @@ struct World {
         env.windir = sb / "Windows";
         env.system_drive_root = sb / "Drive";
         env.undo_root = sb / "Local/HEM Guard/Undo";
+        env.user_sid = "S-1-5-21-1";
         env.protected_folders = {{"Documents", sb / "Users/test/Documents"}, {"Desktop", sb / "Users/test/Desktop"},
                                  {"Pictures", sb / "Users/test/Pictures"},   {"Music", sb / "Users/test/Music"},
                                  {"Videos", sb / "Users/test/Videos"},       {"Downloads", sb / "Users/test/Downloads"}};
@@ -584,3 +586,68 @@ HG_TEST(cleaner_safety, a_file_in_use_is_skipped_not_forced) {
     undo.restore_latest();
 }
 #endif
+
+// ---------------------------------------------- fixes from the independent review --
+
+HG_TEST(cleaner_review, only_your_own_recycle_bin_is_ever_a_target) {
+    World w;
+    const auto targets = default_targets(w.env);
+    const auto* rb = find_target(targets, "recycle-bin");
+    REQUIRE(rb != nullptr);
+    CHECK(path_is_within(w.sb / "Drive/$Recycle.Bin/S-1-5-21-1/$R123.txt", rb->root));
+    CHECK(!path_is_within(w.sb / "Drive/$Recycle.Bin/S-1-5-21-2/$R999.txt", rb->root));
+    // Even with the careful opt-in, the other person's deleted file is not in the plan and not touched.
+    PlanOptions opt;
+    opt.include_careful = true;
+    opt.now = unix_now() + 10 * 86400;
+    auto plan = make_plan(w.env, targets, opt);
+    CHECK(!contains(plan_rel_paths(w, plan), "Drive/$Recycle.Bin/S-1-5-21-2/$R999.txt"));
+    // No account id known -> no Recycle Bin target at all.
+    World w2;
+    w2.env.user_sid.clear();
+    std::vector<std::string> notes;
+    CHECK(find_target(default_targets(w2.env, &notes), "recycle-bin") == nullptr);
+    CHECK(!notes.empty());
+}
+
+HG_TEST(cleaner_review, a_temp_setting_that_points_at_a_work_folder_is_left_alone) {
+    World w;
+    fs::create_directories(w.sb / "Local/Dropbox");
+    hgt::write_file(w.sb / "Local/Dropbox/important.docx", "my work");
+    w.env.user_temp = w.sb / "Local/Dropbox";
+    std::vector<std::string> notes;
+    const auto targets = default_targets(w.env, &notes);
+    CHECK(find_target(targets, "user-temp") == nullptr);
+    bool said = false;
+    for (const auto& n : notes) said = said || n.find("not called Temp") != std::string::npos;
+    CHECK(said);
+}
+
+HG_TEST(cleaner_review, a_batch_folder_with_unexpected_files_is_never_wiped) {
+    World w;
+    UndoStore undo(w.env.undo_root, 7);
+    std::string id, err;
+    REQUIRE(undo.begin_batch(id, err));
+    const fs::path victim = hgt::write_file(w.sb / "Local/Temp/a.tmp", "aaa");
+    REQUIRE(undo.store(id, victim, 3, err));
+    // Something we did not put there (for example a stored file whose log line got damaged).
+    const fs::path stray = hgt::write_file(w.env.undo_root / id / "0123456789abcdef.bin", "precious");
+    const auto r = undo.restore_batch(id);
+    CHECK_EQ(r.restored, static_cast<std::size_t>(1));
+    CHECK(fs::exists(victim));
+    CHECK(fs::exists(stray));  // still there; the folder was not deleted around it
+    CHECK_EQ(hgt::slurp(stray), std::string("precious"));
+}
+
+HG_TEST(cleaner_review, a_tampered_undo_log_with_a_relative_path_is_refused) {
+    World w;
+    UndoStore undo(w.env.undo_root, 7);
+    std::string id, err;
+    REQUIRE(undo.begin_batch(id, err));
+    const fs::path bin = hgt::write_file(w.env.undo_root / id / "0123456789abcdef.bin", "payload");
+    hgt::write_file(w.env.undo_root / id / "items.tsv", "0123456789abcdef.bin\t7\tevil/relative/target.txt\n");
+    const auto r = undo.restore_batch(id);
+    CHECK_EQ(r.restored, static_cast<std::size_t>(0));
+    CHECK(r.failed >= 1);
+    CHECK(fs::exists(bin));  // kept, not deleted
+}

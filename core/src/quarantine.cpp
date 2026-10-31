@@ -33,6 +33,10 @@ void xor_block(std::uint8_t* data, std::size_t n, std::uint64_t offset) {
     }
 }
 
+bool valid_id(const std::string& id) {
+    return id.size() == 12 && id.find_first_not_of("0123456789abcdef") == std::string::npos;
+}
+
 std::string entry_line(const QuarantineEntry& e) {
     return e.id + "\t" + (e.active ? "Q" : "R") + "\t" + std::to_string(e.size) + "\t" + e.sha256 + "\t" +
            std::to_string(e.time) + "\t" + tsv_escape(to_u8(e.original)) + "\t" + tsv_escape(e.reason) + "\n";
@@ -81,6 +85,9 @@ bool Quarantine::quarantine_file(const fs::path& file, const std::string& reason
         error = "cannot read file size";
         return false;
     }
+    ec.clear();
+    const auto mtime_before = fs::last_write_time(file, ec);
+    const bool have_mtime = !ec;
     std::uint8_t header[kHeaderBytes];
     put_header(header, original_size);
     out.write(reinterpret_cast<const char*>(header), kHeaderBytes);
@@ -116,13 +123,12 @@ bool Quarantine::quarantine_file(const fs::path& file, const std::string& reason
         return false;
     }
 
-    // Only now take the original out of its place.
+    // The file must not have changed while we were copying it.
     ec.clear();
-    fs::remove(file, ec);
-    if (ec) {
+    if (fs::file_size(file, ec) != original_size || ec || (have_mtime && fs::last_write_time(file, ec) != mtime_before)) {
         std::error_code ignore;
         fs::remove(payload, ignore);
-        error = "file is in use or locked, so it was left where it is";
+        error = "the file changed while it was being copied, so it was left where it is";
         return false;
     }
 
@@ -133,30 +139,27 @@ bool Quarantine::quarantine_file(const fs::path& file, const std::string& reason
     e.sha256 = hasher.finish_hex();
     e.time = unix_now();
     e.reason = reason;
+    // Write the log line BEFORE touching the original. If this fails, nothing has been removed yet.
     if (!append_text_file(manifest_path(), entry_line(e))) {
-        // The file is safe in quarantine but the log write failed: put it back rather than lose track of it.
-        std::string ignore;
-        // Restore needs a manifest line, so write via a direct copy back.
-        std::ifstream pin(payload, std::ios::binary);
-        std::ofstream pout(file, std::ios::binary);
-        if (pin && pout) {
-            pin.seekg(kHeaderBytes);
-            std::uint64_t off = 0;
-            while (pin) {
-                pin.read(reinterpret_cast<char*>(buf.data()), static_cast<std::streamsize>(buf.size()));
-                const auto got = static_cast<std::size_t>(pin.gcount());
-                if (got == 0) break;
-                xor_block(buf.data(), got, off);
-                pout.write(reinterpret_cast<const char*>(buf.data()), static_cast<std::streamsize>(got));
-                off += got;
-            }
-            pout.flush();
-            pin.close();
-            pout.close();
-            std::error_code ignore2;
-            fs::remove(payload, ignore2);
+        std::error_code ignore;
+        fs::remove(payload, ignore);
+        error = "could not write the quarantine log, so the file was left where it is";
+        return false;
+    }
+
+    // Only now take the original out of its place.
+    ec.clear();
+    fs::remove(file, ec);
+    if (ec) {
+        // Could not remove it (in use). Mark the log line as not active and drop the copy.
+        auto all = list();
+        for (auto& x : all) {
+            if (x.id == id) x.active = false;
         }
-        error = "could not write the quarantine log; the file was put back";
+        rewrite_manifest(all);
+        std::error_code ignore;
+        fs::remove(payload, ignore);
+        error = "file is in use or locked, so it was left where it is";
         return false;
     }
     id_out = id;
@@ -171,6 +174,7 @@ std::vector<QuarantineEntry> Quarantine::list() const {
         if (line.empty()) continue;
         const auto f = split(line, '\t');
         if (f.size() < 7) continue;
+        if (!valid_id(f[0])) continue;  // a tampered id could point at some other file
         QuarantineEntry e;
         e.id = f[0];
         e.active = (f[1] == "Q");
@@ -215,6 +219,10 @@ bool Quarantine::restore(const std::string& id, std::string& error, const fs::pa
     }
     const fs::path dest = to ? *to : hit->original;
     std::error_code ec;
+    if (!dest.is_absolute() || path_is_within(normalize_path(dest), normalize_path(root_))) {
+        error = "the saved original path looks wrong, so nothing was restored";
+        return false;
+    }
     if (fs::exists(fs::symlink_status(dest, ec))) {
         error = "something already exists at " + to_u8(dest) + " (restore never overwrites)";
         return false;
@@ -233,9 +241,9 @@ bool Quarantine::restore(const std::string& id, std::string& error, const fs::pa
         return false;
     }
     fs::create_directories(dest.parent_path(), ec);
-    const fs::path tmp = dest.parent_path() / (to_u8(dest.filename()) + ".hgq-restoring");
+    const fs::path tmp = dest.parent_path() / (to_u8(dest.filename()) + "." + random_hex(4) + ".hgq-restoring");
     {
-        std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
+        std::ofstream out(tmp, std::ios::binary);
         if (!out) {
             error = "cannot create the restored file (no permission?)";
             return false;
@@ -263,11 +271,11 @@ bool Quarantine::restore(const std::string& id, std::string& error, const fs::pa
         }
     }
     ec.clear();
-    fs::rename(tmp, dest, ec);
-    if (ec) {
+    std::string move_err;
+    if (!move_file_safe(tmp, dest, move_err)) {  // never replaces a file that showed up meanwhile
         std::error_code ignore;
         fs::remove(tmp, ignore);
-        error = "could not put the file in place: " + ec.message();
+        error = "could not put the file in place: " + move_err;
         return false;
     }
     in.close();

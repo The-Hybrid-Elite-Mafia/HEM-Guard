@@ -126,11 +126,22 @@ bool UndoStore::store(const std::string& batch_id, const fs::path& original, std
     it.size = size;
     it.original = original;
     const fs::path dest = batch_dir(batch_id) / it.stored;
-    if (!move_file_safe(original, dest, error)) return false;
-    if (!append_text_file(batch_dir(batch_id) / "items.tsv", item_line(it))) {
-        std::string ignore;
-        move_file_safe(dest, original, ignore);  // put it back; never lose track of a file
+    const fs::path log = batch_dir(batch_id) / "items.tsv";
+    // Write the log line FIRST. A crash after this leaves a line pointing at nothing (harmless),
+    // never a stored file that nobody knows about.
+    if (!append_text_file(log, item_line(it))) {
         error = "cannot write undo log; file was left in place";
+        return false;
+    }
+    if (!move_file_safe(original, dest, error)) {
+        // Take our line back out again.
+        std::vector<Item> keep;
+        for (const auto& x : read_items(log)) {
+            if (x.stored != it.stored) keep.push_back(x);
+        }
+        std::string text;
+        for (const auto& x : keep) text += item_line(x);
+        write_text_file(log, text);
         return false;
     }
     return true;
@@ -175,6 +186,12 @@ RestoreReport UndoStore::restore_batch(const std::string& id) {
     std::vector<Item> remaining;
     for (const auto& it : items) {
         const fs::path stored = dir / it.stored;
+        if (!it.original.is_absolute() || path_is_within(normalize_path(it.original), normalize_path(root_))) {
+            ++r.failed;
+            r.messages.push_back("not restored, the saved path looks wrong: " + to_u8(it.original));
+            remaining.push_back(it);
+            continue;
+        }
         if (!fs::exists(fs::symlink_status(stored, ec))) {
             ++r.missing;
             r.messages.push_back("missing from undo folder: " + to_u8(it.original));
@@ -197,8 +214,13 @@ RestoreReport UndoStore::restore_batch(const std::string& id) {
         }
     }
     if (remaining.empty()) {
-        // Whole batch is back (or gone). Remove our own bookkeeping folder.
-        if (path_is_within(normalize_path(dir), normalize_path(root_))) fs::remove_all(dir, ec);
+        // Whole batch is back (or gone). Remove only our two bookkeeping files, then the folder IF it is empty.
+        // If anything unexpected is still inside, it stays.
+        if (path_is_within(normalize_path(dir), normalize_path(root_))) {
+            fs::remove(dir / "items.tsv", ec);
+            fs::remove(dir / "batch.meta", ec);
+            fs::remove(dir, ec);  // not recursive: fails harmlessly if something is left
+        }
     } else {
         std::string text;
         for (const auto& it : remaining) text += item_line(it);

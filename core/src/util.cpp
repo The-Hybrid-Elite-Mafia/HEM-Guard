@@ -8,6 +8,10 @@
 #include <random>
 #include <system_error>
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 namespace hem::guard {
 
 std::string to_u8(const fs::path& p) {
@@ -212,11 +216,28 @@ bool read_text_file(const fs::path& p, std::string& out, std::uint64_t max_bytes
 }
 
 bool write_text_file(const fs::path& p, std::string_view data) {
-    std::ofstream f(p, std::ios::binary | std::ios::trunc);
-    if (!f) return false;
-    f.write(data.data(), static_cast<std::streamsize>(data.size()));
-    f.flush();
-    return static_cast<bool>(f);
+    // Write a side file, then swap it in, so a crash never leaves a half-written log.
+    fs::path tmp = p;
+    tmp += ".tmp";
+    {
+        std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
+        if (!f) return false;
+        f.write(data.data(), static_cast<std::streamsize>(data.size()));
+        f.flush();
+        if (!f) {
+            f.close();
+            std::error_code ignore;
+            fs::remove(tmp, ignore);
+            return false;
+        }
+    }
+    std::error_code ec;
+    fs::rename(tmp, p, ec);  // replaces the old file on purpose (this is our own log)
+    if (ec) {
+        fs::remove(tmp, ec);
+        return false;
+    }
+    return true;
 }
 
 bool append_text_file(const fs::path& p, std::string_view data) {
@@ -228,11 +249,21 @@ bool append_text_file(const fs::path& p, std::string_view data) {
 }
 
 bool move_file_safe(const fs::path& from, const fs::path& to, std::string& error) {
+    error.clear();
     std::error_code ec;
     if (fs::exists(fs::symlink_status(to, ec))) {
         error = "target already exists";
         return false;
     }
+#ifdef _WIN32
+    // MoveFileEx WITHOUT the replace flag: if something appears at the target a moment from now, it fails
+    // instead of overwriting. COPY_ALLOWED lets it cross drives. Windows copies, checks and removes the source.
+    if (MoveFileExW(from.c_str(), to.c_str(), MOVEFILE_COPY_ALLOWED)) return true;
+    const DWORD code = GetLastError();
+    error = (code == ERROR_ALREADY_EXISTS || code == ERROR_FILE_EXISTS) ? "target already exists"
+                                                                       : "move failed (file in use, locked or no permission), Windows error " + std::to_string(code);
+    return false;
+#else
     ec.clear();
     fs::rename(from, to, ec);
     if (!ec) return true;
@@ -247,8 +278,11 @@ bool move_file_safe(const fs::path& from, const fs::path& to, std::string& error
     ec.clear();
     if (!fs::copy_file(from, to, fs::copy_options::none, ec) || ec) {
         error = "copy failed: " + ec.message();
-        std::error_code ignore;
-        fs::remove(to, ignore);
+        // Only clean up if the failure left OUR half-copy; never delete a file that was already there.
+        if (ec != std::errc::file_exists) {
+            std::error_code ignore;
+            fs::remove(to, ignore);
+        }
         return false;
     }
     ec.clear();
@@ -262,13 +296,13 @@ bool move_file_safe(const fs::path& from, const fs::path& to, std::string& error
     ec.clear();
     fs::remove(from, ec);
     if (ec) {
-        // Source is locked / in use. Roll back the copy so there are not two files.
         error = "file is in use or locked: " + ec.message();
         std::error_code ignore;
         fs::remove(to, ignore);
         return false;
     }
     return true;
+#endif
 }
 
 bool glob_match(std::string_view pat, std::string_view txt) {

@@ -163,3 +163,43 @@ HG_TEST(quarantine, empty_file_round_trip) {
     CHECK(fs::exists(f));
     CHECK_EQ(fs::file_size(f), static_cast<std::uintmax_t>(0));
 }
+
+// ---------------------------------------------- fixes from the independent review --
+
+HG_TEST(quarantine_review, if_the_log_cannot_be_written_the_file_stays_exactly_where_it_was) {
+    hgt::Sandbox sb;
+    const fs::path f = hgt::write_file(sb / "work/keep.dat", "important bytes");
+    Quarantine q(sb / "Q");
+    fs::create_directories(sb / "Q/manifest.tsv");  // a folder where the log should be: appending fails
+    std::string id, err;
+    CHECK(!q.quarantine_file(f, "test", id, err));
+    CHECK(fs::exists(f));                                 // not removed
+    CHECK_EQ(hgt::slurp(f), std::string("important bytes"));
+    std::size_t hgq = 0;
+    for (const auto& e : fs::directory_iterator(sb / "Q")) hgq += (e.path().extension() == ".hgq");
+    CHECK_EQ(hgq, static_cast<std::size_t>(0));           // no orphan copy left behind
+}
+
+HG_TEST(quarantine_review, a_log_line_with_a_made_up_id_is_ignored) {
+    hgt::Sandbox sb;
+    const fs::path f = hgt::write_file(sb / "work/a.dat", "abc");
+    Quarantine q(sb / "Q");
+    std::string id, err;
+    REQUIRE(q.quarantine_file(f, "test", id, err));
+    const std::string good = hgt::slurp(sb / "Q/manifest.tsv");
+    std::string bad = good;
+    bad.replace(0, id.size(), "..\\..\\somefile");
+    hgt::write_file(sb / "Q/manifest.tsv", good + bad);
+    CHECK_EQ(q.list().size(), static_cast<std::size_t>(1));  // the forged line is dropped
+}
+
+HG_TEST(quarantine_review, restore_to_a_relative_path_is_refused) {
+    hgt::Sandbox sb;
+    const fs::path f = hgt::write_file(sb / "work/b.dat", "abc");
+    Quarantine q(sb / "Q");
+    std::string id, err;
+    REQUIRE(q.quarantine_file(f, "test", id, err));
+    const fs::path rel = fs::path("somewhere") / "b.dat";
+    CHECK(!q.restore(id, err, &rel));
+    CHECK(fs::exists(q.payload_path(id)));  // still safe in quarantine
+}

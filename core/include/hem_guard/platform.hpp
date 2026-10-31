@@ -33,6 +33,9 @@ KnownFolders known_folders();
 // Runs a program (no shell). Returns its exit code, or -1 if it could not start.
 int run_process(const std::vector<std::string>& args, std::string& output);
 
+// Text form of the signed-in account id (used to find your own Recycle Bin). Empty if unknown / not Windows.
+std::string current_user_sid();
+
 bool is_windows();
 
 }  // namespace hem::guard
