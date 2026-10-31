@@ -1,0 +1,8 @@
+# HEM Guard known-bad file list.
+#
+# One per line:   <SHA-256 of the file, 64 hex characters>  <optional name>
+#
+# HONEST NOTE: ships with the EICAR test file only. It does NOT contain a real malware database.
+# Add hashes from a source you trust. Nothing here is a claim about any real malware family.
+
+275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f  EICAR.TestFile.68byte

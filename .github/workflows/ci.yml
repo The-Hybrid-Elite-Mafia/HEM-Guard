@@ -1,0 +1,85 @@
+name: HEM Guard - build, test, package
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  windows:
+    name: Windows (the real test)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S . -B build -A x64
+
+      - name: Build (Release)
+        run: cmake --build build --config Release --parallel
+
+      - name: Run every automated test
+        shell: pwsh
+        run: |
+          .\build\Release\hem_guard_tests.exe --report test-report.md
+          $code = $LASTEXITCODE
+          Get-Content test-report.md | Add-Content $env:GITHUB_STEP_SUMMARY
+          exit $code
+
+      - name: Demo on made-up files (must say DEMO PASSED)
+        shell: pwsh
+        run: |
+          $out = .\build\Release\hem_guard_cli.exe demo | Out-String
+          Write-Host $out
+          if ($out -notmatch "DEMO PASSED") { throw "demo did not pass" }
+
+      - name: Real command-line smoke test on a throwaway folder
+        shell: pwsh
+        run: |
+          $d = Join-Path $env:RUNNER_TEMP "hg-smoke"
+          New-Item -ItemType Directory -Force $d | Out-Null
+          "HEM-GUARD-DEMO-MARKER-0001 harmless" | Set-Content (Join-Path $d "marker.dat")
+          "just text" | Set-Content (Join-Path $d "invoice.pdf.exe")
+          .\build\Release\hem_guard_cli.exe scan $d --rules rules\hem_rules.txt --hashes rules\hem_known_bad_hashes.txt --cpu 0.5
+          if ($LASTEXITCODE -ne 2) { throw "scan should have exited 2 (found things), got $LASTEXITCODE" }
+          .\build\Release\hem_guard_cli.exe storage $d
+          .\build\Release\hem_guard_cli.exe clean
+          .\build\Release\hem_guard_cli.exe startup list
+          .\build\Release\hem_guard_cli.exe version
+
+      - name: Package the Windows zip
+        if: always()
+        shell: pwsh
+        run: |
+          $d = "dist\HEM-Guard"
+          New-Item -ItemType Directory -Force "$d\rules" | Out-Null
+          Copy-Item build\Release\hem_guard_cli.exe $d
+          Copy-Item rules\*.txt "$d\rules"
+          Copy-Item packaging\* $d
+          Copy-Item docs\GUIDE.txt $d
+          if (Test-Path test-report.md) { Copy-Item test-report.md "$d\TEST-REPORT.md" }
+          Compress-Archive -Path $d -DestinationPath HEM-Guard-windows-x64.zip -Force
+          (Get-FileHash HEM-Guard-windows-x64.zip -Algorithm SHA256).Hash | Set-Content HEM-Guard-windows-x64.zip.sha256
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: HEM-Guard-windows-x64
+          path: |
+            HEM-Guard-windows-x64.zip
+            HEM-Guard-windows-x64.zip.sha256
+            test-report.md
+
+  linux:
+    name: Linux (extra check, same tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+      - run: cmake --build build --parallel
+      - name: Run every automated test
+        run: |
+          ./build/hem_guard_tests --report test-report-linux.md
+          code=$?
+          cat test-report-linux.md >> "$GITHUB_STEP_SUMMARY"
+          exit $code

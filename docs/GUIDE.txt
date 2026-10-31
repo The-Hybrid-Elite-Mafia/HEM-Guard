@@ -1,0 +1,67 @@
+HEM GUARD - ONE-PAGE GUIDE
+==========================================================================
+
+WHAT IT IS
+A small tool that (1) scans folders for known-bad files and warning signs,
+(2) cleans junk files safely with a one-step undo, (3) shows what starts
+with Windows and lets you switch items off and on, and (4) shows what is
+using your disk space. It is on-demand: it works when YOU run it.
+
+WHAT IT IS NOT (please read)
+ - It is NOT a replacement for Windows Security (Defender). Keep that ON.
+ - It has NO live protection. It will not stop a virus the moment it runs.
+ - It has no deep Windows-level protection, and it is not independently
+   certified by any lab.
+ - It ships with TEST rules only (the harmless EICAR test file and a HEM
+   test marker). It has no real malware database yet. The "warning signs"
+   (like invoice.pdf.exe, or a program hiding behind a .jpg name) work on
+   their own. For known-bad files you must add a hash list or rules from a
+   source you trust (see "Adding real rules" below).
+ - "Nothing found" does not prove a file is safe.
+
+HOW TO USE IT - just double-click the numbered files:
+ 1  Scan my Downloads folder        Only reads. Never deletes.
+ 2  Scan any folder                 You type the folder.
+ 3  Preview clean                   Shows what COULD be cleaned. Changes nothing.
+ 4  Clean now (with undo)           Asks you to type YES first.
+ 5  Undo the last clean             Puts everything back.
+ 6  Show startup programs           Lists them, signed or unsigned.
+ 7  Storage report                  Biggest folders and file types.
+ 8  Try the demo                    Runs everything on made-up files. Safe.
+ 9  Show quarantined files
+
+THE SAFETY PROMISES (each one has an automated test)
+ - Cleaning is a PREVIEW first. Nothing moves until you type YES.
+ - Cleaned files are MOVED to "HEM Guard Undo" (in AppData\Local\HEM Guard)
+   and kept 7 days. Undo puts them back, identical, byte for byte.
+ - Never touched: Documents, Desktop, Pictures, Music, Videos, Downloads,
+   OneDrive, project folders, and anything not on the cleanup list.
+ - Each place is marked SAFE, CAREFUL or DO NOT TOUCH. CAREFUL places
+   (Windows Update cache, Recycle Bin) are left out unless you add --careful.
+ - Browser cleaning touches only cache folders, never passwords, cookies,
+   history or bookmarks.
+ - There is NO registry cleaner. Registry "cleaning" risks breaking Windows
+   and makes almost no speed difference, so it is left out on purpose.
+ - Duplicate finder only REPORTS. It never deletes.
+ - A found bad file goes to quarantine (renamed .hgq and scrambled so it
+   cannot run). Nothing is deleted. You can restore it.
+ - Startup "disable" flips the same switch Windows Task Manager uses. Nothing
+   is deleted. Windows' own scheduled tasks are shown but cannot be changed.
+
+THINGS TO EXPECT
+ - Windows may say "unknown publisher" the first time, because this program
+   is not code-signed (signing costs money). The SHA-256 of the zip is
+   published next to it so you can check you have the right file.
+ - Files in use by another program are skipped, not forced.
+ - Cleaning Windows Temp and the Update cache needs "Run as administrator".
+ - If you scan a folder holding the EICAR test file, Windows Security may
+   remove that file first. That is it working, not a problem.
+ - A scan is limited to about half of one CPU core so your PC stays smooth.
+
+ADDING REAL RULES
+ - rules\hem_known_bad_hashes.txt : one SHA-256 per line, then a name.
+ - rules\hem_rules.txt            : one pattern rule per line (examples inside).
+ Only add data from a source you trust. A wrong entry can flag a good file.
+
+FILES THIS TOOL CREATES (all in %LOCALAPPDATA%\HEM Guard)
+   Quarantine\   Undo\   startup-journal.tsv

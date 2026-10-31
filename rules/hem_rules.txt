@@ -1,0 +1,15 @@
+# HEM Guard pattern rules.
+#
+# One rule per line:   NAME | low/medium/high | hex or text | PATTERN
+# Lines starting with # are notes. Patterns must be at least 4 bytes.
+#
+# HONEST NOTE: this file ships with TEST rules only. It proves the scanner works.
+# It does NOT contain a real malware database. To catch real malware you must add
+# rules / hashes from a source you trust (see the guide).
+
+# The industry-standard harmless antivirus test string (68 bytes), written as hex so this
+# file itself is not mistaken for a test file by other security tools.
+EICAR.Test | high | hex | 58 35 4f 21 50 25 40 41 50 5b 34 5c 50 5a 58 35 34 28 50 5e 29 37 43 43 29 37 7d 24 45 49 43 41 52 2d 53 54 41 4e 44 41 52 44 2d 41 4e 54 49 56 49 52 55 53 2d 54 45 53 54 2d 46 49 4c 45 21 24 48 2b 48 2a
+
+# A made-up marker used by "hem_guard_cli demo" and the automated tests. Harmless.
+HEM.Demo.Marker | high | text | HEM-GUARD-DEMO-MARKER-0001
