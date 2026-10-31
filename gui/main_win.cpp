@@ -914,6 +914,11 @@ void create_pages() {
     HWND n4 = mklabel(p, L"Big folders can take a while, and these two jobs cannot be cancelled yet.", IDC_T_NOTE);
     SendMessageW(n4, WM_SETFONT, reinterpret_cast<WPARAM>(g.font_small), TRUE);
 
+    // Stacking order: the tab control sits at the very back, the pages in front of it. (Otherwise the tab
+    // control's own grey body is drawn over the pages and the tab looks empty.)
+    SetWindowPos(g.tab, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    for (int i = 0; i < 4; ++i) SetWindowPos(g.page[i], HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+
     // defaults
     const auto kf = known_folders();
     set_text(C(0, IDC_S_PATH), WP(kf.downloads));
@@ -1207,6 +1212,15 @@ bool save_screenshot(const fs::path& file) {
     return ok;
 }
 
+// Asks Windows what is really on top at the middle of a control. True only if it is that control (or part of it).
+bool really_on_top(HWND c) {
+    RECT r;
+    GetWindowRect(c, &r);
+    POINT pt{(r.left + r.right) / 2, (r.top + r.bottom) / 2};
+    HWND w = WindowFromPoint(pt);
+    return w == c || (w && IsChild(c, w));
+}
+
 // Is this control really on screen with a real size?
 std::string visible_info(HWND page, int id, const char* name) {
     HWND c = GetDlgItem(page, id);
@@ -1254,6 +1268,8 @@ int run_selftest(const fs::path& sb) {
         GetWindowRect(C(0, IDC_S_LIST), &rl);
         t.check(IsWindowVisible(C(0, IDC_S_LIST)) && rl.right - rl.left > 200 && rl.bottom - rl.top > 100, "scan list is visible and has a real size");
         t.check(IsWindowVisible(C(0, IDC_S_DOWNLOADS)), "scan buttons are visible");
+        t.check(really_on_top(C(0, IDC_S_LIST)), "scan list is the thing on top at its centre (not hidden behind the tab control)");
+        t.check(really_on_top(C(0, IDC_S_DOWNLOADS)), "scan button is the thing on top at its centre");
     }
     save_screenshot(shots / "1-scan-results.bmp");
     lv_select_first(C(0, IDC_S_LIST));
@@ -1293,6 +1309,7 @@ int run_selftest(const fs::path& sb) {
     pump();
     t.check(g.have_plan && g.plan.items.size() == 3, "clean preview lists exactly the 3 temp files (found " + std::to_string(g.plan.items.size()) + ")");
     t.check(fs::exists(e.user_temp / "a.tmp"), "preview changed nothing");
+    t.check(really_on_top(C(1, IDC_C_LIST)), "clean list is really on top");
     save_screenshot(shots / "3-clean-preview.bmp");
     clean_apply();
     pump();
@@ -1310,6 +1327,7 @@ int run_selftest(const fs::path& sb) {
     pump();
     t.check(!g.busy, "startup list finished (" + std::to_string(g.startup_items.size()) + " items on this machine)");
     t.check(ListView_GetItemCount(C(2, IDC_U_LIST)) == static_cast<int>(g.startup_items.size()), "startup list rows match the engine");
+    t.check(really_on_top(C(2, IDC_U_LIST)), "startup list is really on top");
     save_screenshot(shots / "5-startup.bmp");
 
     // ---- Storage tab
@@ -1323,6 +1341,7 @@ int run_selftest(const fs::path& sb) {
     pump();
     t.check(g.have_storage && g.storage.total_files == 3, "storage counted 3 files (got " + std::to_string(g.storage.total_files) + ")");
     t.check(ListView_GetItemCount(C(3, IDC_T_LIST)) >= 1, "storage list has rows");
+    t.check(really_on_top(C(3, IDC_T_LIST)), "storage list is really on top");
     save_screenshot(shots / "6-storage.bmp");
     storage_analyze(true);
     pump();
