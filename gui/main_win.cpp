@@ -1162,15 +1162,7 @@ void pump(int ms_max = 120000) {
     }
 }
 
-bool save_screenshot(const fs::path& file) {
-    RECT rc;
-    GetWindowRect(g.main, &rc);
-    const int w = rc.right - rc.left, h = rc.bottom - rc.top;
-    HDC screen = GetDC(nullptr);
-    HDC mem = CreateCompatibleDC(screen);
-    HBITMAP bmp = CreateCompatibleBitmap(screen, w, h);
-    HGDIOBJ old = SelectObject(mem, bmp);
-    PrintWindow(g.main, mem, PW_RENDERFULLCONTENT);
+bool save_bitmap(HBITMAP bmp, HDC mem, int w, int h, const fs::path& file) {
     BITMAPINFOHEADER bi{};
     bi.biSize = sizeof(bi);
     bi.biWidth = w;
@@ -1181,10 +1173,6 @@ bool save_screenshot(const fs::path& file) {
     const int stride = ((w * 3 + 3) / 4) * 4;
     std::vector<unsigned char> px(static_cast<std::size_t>(stride) * static_cast<std::size_t>(h));
     GetDIBits(mem, bmp, 0, static_cast<UINT>(h), px.data(), reinterpret_cast<BITMAPINFO*>(&bi), DIB_RGB_COLORS);
-    SelectObject(mem, old);
-    DeleteObject(bmp);
-    DeleteDC(mem);
-    ReleaseDC(nullptr, screen);
     BITMAPFILEHEADER fh{};
     fh.bfType = 0x4D42;
     fh.bfOffBits = sizeof(fh) + sizeof(bi);
@@ -1195,6 +1183,36 @@ bool save_screenshot(const fs::path& file) {
     f.write(reinterpret_cast<const char*>(&bi), sizeof(bi));
     f.write(reinterpret_cast<const char*>(px.data()), static_cast<std::streamsize>(px.size()));
     return static_cast<bool>(f);
+}
+
+// Copies what is really on the screen where the window is (so it shows exactly what a person would see).
+bool save_screenshot(const fs::path& file) {
+    SetWindowPos(g.main, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+    SetForegroundWindow(g.main);
+    RedrawWindow(g.main, nullptr, nullptr, RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_UPDATENOW);
+    Sleep(250);
+    RECT rc;
+    GetWindowRect(g.main, &rc);
+    const int w = rc.right - rc.left, h = rc.bottom - rc.top;
+    HDC screen = GetDC(nullptr);
+    HDC mem = CreateCompatibleDC(screen);
+    HBITMAP bmp = CreateCompatibleBitmap(screen, w, h);
+    HGDIOBJ old = SelectObject(mem, bmp);
+    BitBlt(mem, 0, 0, w, h, screen, rc.left, rc.top, SRCCOPY | CAPTUREBLT);
+    SelectObject(mem, old);
+    const bool ok = save_bitmap(bmp, mem, w, h, file);
+    DeleteObject(bmp);
+    DeleteDC(mem);
+    ReleaseDC(nullptr, screen);
+    return ok;
+}
+
+// Is this control really on screen with a real size?
+std::string visible_info(HWND page, int id, const char* name) {
+    HWND c = GetDlgItem(page, id);
+    RECT r{};
+    if (c) GetWindowRect(c, &r);
+    return std::string(name) + ": " + (c && IsWindowVisible(c) ? "visible " : "NOT visible ") + std::to_string(r.right - r.left) + "x" + std::to_string(r.bottom - r.top);
 }
 
 void write_file(const fs::path& p, const std::string& s) {
@@ -1229,6 +1247,14 @@ int run_selftest(const fs::path& sb) {
     t.check(!g.busy, "scan finished");
     t.check(g.findings.size() == 1, "scan found exactly the one marker file (found " + std::to_string(g.findings.size()) + ")");
     t.check(ListView_GetItemCount(C(0, IDC_S_LIST)) == 1, "scan result list shows 1 row");
+    {
+        const std::string a = visible_info(P(0), IDC_S_LIST, "scan list"), b = visible_info(P(0), IDC_S_DOWNLOADS, "scan button");
+        t.lines.push_back("INFO  " + a + " | " + b);
+        RECT rl{};
+        GetWindowRect(C(0, IDC_S_LIST), &rl);
+        t.check(IsWindowVisible(C(0, IDC_S_LIST)) && rl.right - rl.left > 200 && rl.bottom - rl.top > 100, "scan list is visible and has a real size");
+        t.check(IsWindowVisible(C(0, IDC_S_DOWNLOADS)), "scan buttons are visible");
+    }
     save_screenshot(shots / "1-scan-results.bmp");
     lv_select_first(C(0, IDC_S_LIST));
     do_quarantine(selected_findings());
