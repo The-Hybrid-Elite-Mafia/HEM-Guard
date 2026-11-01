@@ -122,6 +122,15 @@ jobs:
             HEM-Guard-windows-x64.zip.sha256
             test-report.md
 
+      - name: Draft release (private until published)
+        if: github.ref == 'refs/heads/main'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete v0.1.0-test --yes 2>$null
+          gh release create v0.1.0-test HEM-Guard-windows-x64.zip HEM-Guard-windows-x64.zip.sha256 --draft --title "HEM Guard 0.1.0 test build" --notes "Draft test build. Not published."
+
   linux:
     name: Linux (extra check, same tests)
     runs-on: ubuntu-latest
